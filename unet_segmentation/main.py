@@ -21,15 +21,18 @@ if __name__ == '__main__':
             A.Normalize(
                 mean=(0),
                 std=(1),
-
             )
-        ],
+        ]
     )
+    # def transform(sample_in):
+    #     return {'images': train_transform(sample_in['images']), 'masks': train_transform(sample_in['masks'])}
+    # dl = ds.pytorch(batch_size=8, transform=transform, shuffle=True)
     ds = dataset.SegmentationDataset(ds, train_transform)
     dl = DataLoader(ds, batch_size=6, num_workers=6,shuffle=True)
-    # dl = ds.pytorch(batch_size = 16, num_workers = 2, transform = {'images': train_transform , 'masks': train_transform }, shuffle = True)
-    trainer = pl.Trainer(max_epochs=60, accelerator='auto', default_root_dir='.\\unet_segmentation\\checkpoints')
+    trainer = pl.Trainer(max_epochs=3, accelerator='auto', default_root_dir='.\\unet_segmentation\\checkpoints')
     model = cm.UNET(3,1)
     model = cm.LightModel(model, nn.BCEWithLogitsLoss())
     trainer.fit(model, dl)
     trainer.save_checkpoint("unet_segmentation.ckpt")
+
+# Read https://medium.com/analytics-vidhya/pytorch-implementation-of-semantic-segmentation-for-single-class-from-scratch-81f96643c98c

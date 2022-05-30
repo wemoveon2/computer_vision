@@ -1,5 +1,6 @@
 import math
 import torch
+import torchmetrics
 import torch.nn as nn
 import torchvision.transforms.functional as TF
 from transformers import get_cosine_schedule_with_warmup
@@ -11,10 +12,10 @@ class Block(nn.Module):
         self.conv = nn.Sequential(
             nn.Conv2d(in_channels, out_channels, 3, 1, 1, bias= False),
             nn.BatchNorm2d(out_channels),
-            nn.ReLU(),
+            nn.LeakyReLU(),
             nn.Conv2d(out_channels, out_channels, 3, 1, 1, bias= False),
             nn.BatchNorm2d(out_channels),
-            nn.ReLU()
+            nn.LeakyReLU()
         )
     def forward(self, x):
         return self.conv(x)
@@ -66,29 +67,64 @@ class UNET(nn.Module):
             x = self.up[idx+1](concat_skip)
         return self.final_conv(x)
 
+def dice_score(pred, targs):
+    pred = (pred>0).float()
+    return 2. * (pred*targs).sum() / (pred+targs).sum()
+
+def weights_init(m):
+    classname = m.__class__.__name__
+    if classname.find('Conv') != -1:
+        m.weight.data.normal_(0.0, 0.02)
+    elif classname.find('BatchNorm') != -1:
+        m.weight.data.normal_(1.0, 0.02)
+        m.bias.data.fill_(0)
+
 class LightModel(pl.LightningModule):
     def __init__(self, model, loss_fn):
         super().__init__()
         self.model = model
         self.loss_fn = loss_fn
-    def forward(self, x, y):
-        pred = self.model(x)
-        if y is not None:
-            loss = self.loss_fn(pred, y)    
-        return pred, loss
-        
+        self.dice = []
+        self._initialize_weights()
+        # self.accuracy = torchmetrics.Accuracy()
+    # def forward(self, x, y):
+    #     pred = self.model(x)
+    #     if y is not None:
+    #         loss = self.loss_fn(pred, y)    
+    #     return pred, loss
+    def _initialize_weights(self):
+        for m in self.modules():
+            if isinstance(m, nn.Conv2d):
+                n = m.kernel_size[0] * m.kernel_size[1] * m.out_channels
+                m.weight.data.normal_(0, math.sqrt(2. / n))
+                if m.bias is not None:
+                    m.bias.data.zero_()
+            elif isinstance(m, nn.BatchNorm2d):
+                m.weight.data.fill_(1)
+                m.bias.data.zero_()
+            elif isinstance(m, nn.Linear):
+                m.weight.data.normal_(0, 0.01)
+                m.bias.data.zero_()
+
+
     def training_step(self, batch, batch_idx):
         x, y = batch
         pred = self.model(x)
         loss = self.loss_fn(pred, y)
+        dice = dice_score(pred, y)
+        self.dice.append(dice)
+        # self.accuracy(pred, y)
         self.log('train loss', loss, prog_bar = True, logger = True)
+        # self.log('train_acc', self.accuracy)
+        self.log('dice_score', dice)
         return {"loss":loss, 'predictions':pred, 'mask': batch[1]}
+    
     def configure_optimizers(self):
-        optimizer = torch.optim.AdamW(params = self.model.parameters(), lr = 1.5e-6, weight_decay = 0.001)
-        total_steps = 159
-        warmup_steps = math.floor(total_steps * 0.2)
-        scheduler = get_cosine_schedule_with_warmup(optimizer, warmup_steps, total_steps)
-        return [optimizer], [scheduler]
+        optimizer = torch.optim.AdamW(params = self.model.parameters(), lr = 1.5e-4, weight_decay = 0.3)
+        # total_steps = 848
+        # warmup_steps = math.floor(total_steps * 0.2)
+        # scheduler = get_cosine_schedule_with_warmup(optimizer, warmup_steps, total_steps)
+        return [optimizer]#, [scheduler]
 
 if __name__ == '__main__':
     model = UNET(3,1)
