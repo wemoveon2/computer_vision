@@ -1,38 +1,29 @@
-import hub 
-import torch
-import pytorch_lightning as pl
-import torch.nn as nn
-import torchvision.transforms as A
-import components.model as cm
-from torch.utils.data import DataLoader
-from components import dataset
-from albumentations.pytorch import ToTensorV2
+import pytorch_lightning as pl 
+from components.model import UNET
+from components.data import SegmentationDataModule
+from components.utils import train_transform
+from argparse import ArgumentParser
+
 
 if __name__ == '__main__':
     torch.cuda.empty_cache()
-    ds = hub.load('hub://wemoveon/carvana_image_masking')
-    train_transform = A.Compose(
-        [
-            A.Resize((160,240)),
-            A.RandomRotation(35),
-            A.RandomHorizontalFlip(p=0.5),
-            A.RandomVerticalFlip(p=0.1),
-            A.ToTensor(),
-            A.Normalize(
-                mean=(0),
-                std=(1),
-            )
-        ]
+
+    ds = SegmentationDataModule(
+        image_path='../input/carvana-image-masking-png/train_images', mask_path= '../input/carvana-image-masking-png/train_masks', transform = train_transform
     )
-    # def transform(sample_in):
-    #     return {'images': train_transform(sample_in['images']), 'masks': train_transform(sample_in['masks'])}
-    # dl = ds.pytorch(batch_size=8, transform=transform, shuffle=True)
-    ds = dataset.SegmentationDataset(ds, train_transform)
-    dl = DataLoader(ds, batch_size=6, num_workers=6,shuffle=True)
-    trainer = pl.Trainer(max_epochs=3, accelerator='auto', default_root_dir='.\\unet_segmentation\\checkpoints')
-    model = cm.UNET(3,1)
-    model = cm.LightModel(model, nn.BCEWithLogitsLoss())
-    trainer.fit(model, dl)
-    trainer.save_checkpoint("unet_segmentation.ckpt")
+
+    parser = ArgumentParser()
+    parser = pl.Trainer.add_argparse_args(parser)
+    parser.add_argument('--max_epochs', default=3)
+    parser.add_argument('--accelerator', default='gpu')
+    parser.add_argument('--gpus', default=1)
+    args = parser.parse_args()
+
+    model = UNET()
+    trainer = pl.Trainer.from_argparse_args(args, profiler='simple')
+    trainer.fit(model, ds)
+    trainer.save_checkpoint("unet_segmentation_2.ckpt")
 
 # Read https://medium.com/analytics-vidhya/pytorch-implementation-of-semantic-segmentation-for-single-class-from-scratch-81f96643c98c
+
+
